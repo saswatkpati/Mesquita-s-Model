@@ -1,0 +1,160 @@
+Code:
+import numpy as np
+
+# Function to get user input for initial variables
+def get_user_inputs():
+    n = int(input("Enter the number of actors: "))
+    names = [input(f"Enter name for actor {i + 1}: ") for i in range(n)]
+    x = np.array([float(input(f"Enter initial position (1-10) for {names[i]}: ")) for i in range(n)])
+    c = np.array([float(input(f"Enter influence/capabilities (1-10) for {names[i]}: ")) for i in range(n)])
+    s = np.array([float(input(f"Enter salience/importance (1-5) for {names[i]}: ")) for i in range(n)])
+    r = np.array([float(input(f"Enter willingness to compromise (0-1) for {names[i]}: ")) for i in range(n)])
+    t = int(input("Enter the number of rounds: "))
+
+    return n, names, x, c, s, t, r
+
+# Constants
+Q = 0.5  # Q value
+T = 0.5  # T value
+
+# Function to calculate pairwise votes
+def calculate_pairwise_votes(n, x, c, s):
+    vjk = np.zeros((n, n))
+    for j in range(n):
+        for k in range(n):
+            if j != k:
+                vjk[j, k] = sum(
+                    c[i] * s[i] * (abs(x[i] - x[k]) - abs(x[i] - x[j])) / (max(x) - min(x)) for i in range(n))
+    return vjk
+
+# Function to find Condorcet winner or median
+def find_condorcet_winner(vjk):
+    condorcet_winner = np.argmax(vjk.sum(axis=0))
+    return condorcet_winner, np.median(vjk)
+
+# Function to calculate basic utilities
+def calculate_utilities(n, x, c, s, r, mu):
+    xmax, xmin = max(x), min(x)
+    Ui_s = 2 - 4 * (0.5 - 0.5 * (x[:, None] - x) / (xmax - xmin)) * r[:, None]
+    Ui_f = 2 - 4 * (0.5 + 0.5 * (x[:, None] - x) / (xmax - xmin)) * r[:, None]
+    Ui_b = 2 - 4 * (0.5 - 0.25 * (abs(x[:, None] - mu) + x[:, None] - x) / (xmax - xmin)) * r[:, None]
+    Ui_w = 2 - 4 * (0.5 + 0.25 * (abs(x[:, None] - mu) + x[:, None] - x) / (xmax - xmin)) * r[:, None]
+    Ui_sq = 2 - 4 * (0.5 * r[:, None])
+    return Ui_s, Ui_f, Ui_b, Ui_w, Ui_sq
+
+# Function to calculate probabilities
+def calculate_probabilities(n, x, c, s):
+    P = np.zeros((n, n))
+    for i in range(n):
+        for k in range(n):
+            if i != k:
+                numerator = c[k] * s[k] * (x[k] - x[i])
+                denominator = sum(c[j] * s[j] * (x[j] - x[i]) for j in range(n) if j != i)
+                P[i, k] = numerator / denominator if denominator != 0 else 0
+    return P
+
+# Function to calculate expected utilities
+def calculate_expected_utilities(Ui_s, Ui_f, Ui_b, Ui_w, Ui_sq, P, s):
+    Ei_Uij = s[:, None] * P * Ui_s + (1 - P) * Ui_f + (1 - s[:, None]) * Ui_b - Q * Ui_sq - (1 - Q) * T * Ui_w
+    return Ei_Uij
+
+# Function to calculate R values
+def calculate_R(n, Ei_Uij):
+    R = np.zeros(n)
+    for i in range(n):
+        Ei_Uji = Ei_Uij[:, i]
+        max_Ei = np.max(Ei_Uji)
+        min_Ei = np.min(Ei_Uji)
+        R[i] = (2 * sum(Ei_Uji) - max_Ei - min_Ei) / (max_Ei - min_Ei) if (max_Ei - min_Ei) != 0 else 0
+    return R
+
+# Function to calculate new r values
+def update_r(R):
+    r = (1 - R / 3) / (1 + R / 3)
+    return r
+
+# Modified function to update positions based on expected utilities and willingness to compromise
+def update_positions(n, x, Ei_Uij, r):
+    new_x = np.zeros_like(x)
+    for i in range(n):
+        numerator = sum(Ei_Uij[i, j] * x[j] for j in range(n))
+        denominator = sum(Ei_Uij[i, j] for j in range(n))
+        new_x[i] = numerator / denominator if denominator != 0 else x[i]
+        new_x[i] = max(1, min(10, new_x[i]))  # Cap between 1 and 10
+    return new_x
+
+# New function to interpret positions
+def interpret_position(position):
+    if position <= 2:
+        return "Strongly supports government stability"
+    elif position <= 4:
+        return "Supports government stability"
+    elif position <= 6:
+        return "Neutral stance"
+    elif position <= 8:
+        return "Supports government change"
+    else:
+        return "Strongly supports immediate government toppling"
+
+# Main function to run the model
+def run_model():
+    n, names, x, c, s, t, r = get_user_inputs()
+
+    print("Initial Positions:", x)
+    print("Initial Willingness to Compromise:", r)
+
+    mean_positions = []
+    median_positions = []
+
+    for round_num in range(1, t + 1):
+        print(f"\nRound {round_num}:")
+
+        vjk = calculate_pairwise_votes(n, x, c, s)
+        print(f"Pairwise Votes (vjk):\n{vjk}\n")
+
+        condorcet_winner, mu = find_condorcet_winner(vjk)
+        print(f"Condorcet Winner Index: {condorcet_winner}")
+        print(f"Median of Pairwise Votes (mu): {mu}\n")
+
+        Ui_s, Ui_f, Ui_b, Ui_w, Ui_sq = calculate_utilities(n, x, c, s, r, mu)
+        print(f"Utilities Ui_s:\n{Ui_s}\n")
+        print(f"Utilities Ui_f:\n{Ui_f}\n")
+        print(f"Utilities Ui_b:\n{Ui_b}\n")
+        print(f"Utilities Ui_w:\n{Ui_w}\n")
+        print(f"Utilities Ui_sq:\n{Ui_sq}\n")
+
+        P = calculate_probabilities(n, x, c, s)
+        print(f"Probabilities (P):\n{P}\n")
+
+        Ei_Uij = calculate_expected_utilities(Ui_s, Ui_f, Ui_b, Ui_w, Ui_sq, P, s)
+        print(f"Expected Utilities (Ei_Uij):\n{Ei_Uij}\n")
+
+        R = calculate_R(n, Ei_Uij)
+        print(f"R Values:\n{R}\n")
+
+        r = update_r(R)
+        print(f"Updated Willingness to Compromise (r):\n{r}\n")
+
+        x = update_positions(n, x, Ei_Uij, r)
+        print(f"Updated Positions (x):\n{x}\n")
+
+        mean_positions.append(np.mean(x))
+        median_positions.append(np.median(x))
+
+    print("\nFinal Positions and Interpretations:")
+    for i in range(n):
+        print(f"{names[i]}: {x[i]:.2f} - {interpret_position(x[i])}")
+
+    print("\nMean Positions Across Rounds:")
+    for round_num, mean_pos in enumerate(mean_positions, 1):
+        print(f"Round {round_num}: {mean_pos:.2f}")
+
+    print("\nMedian Positions Across Rounds:")
+    for round_num, median_pos in enumerate(median_positions, 1):
+        print(f"Round {round_num}: {median_pos:.2f}")
+
+    print(f"\nFinal Mean Position: {mean_positions[-1]:.2f} - {interpret_position(mean_positions[-1])}")
+    print(f"Final Median Position: {median_positions[-1]:.2f} - {interpret_position(median_positions[-1])}")
+
+# Run the model
+run_model()
